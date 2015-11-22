@@ -1,0 +1,16 @@
+<MainScreen>:
+    orientation: 'vertical'
+    size: root.width, root.height
+    active_label: label_display
+
+    RelativeLayout:
+        color: [1,1,1,1]
+
+        Label:
+            size_hunt_y: None
+            text_size: (self.parent.width - 50), None
+            height: self.texture_size[1]
+            id: label_display
+            text: 'Prometheus is alive.'
+            color: [1,1,1,1]
+            font_size: 60

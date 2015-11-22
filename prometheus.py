@@ -1,0 +1,212 @@
+import kivy
+import time
+import urllib2
+from urllib import urlopen
+import os
+import json
+from threading import Thread
+
+import RPi.GPIO as io
+
+from kivy.app import App
+from kivy.lang import Builder
+from kivy.uix.widget import Widget
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.image import Image
+from kivy.properties import StringProperty
+from kivy.properties import ObjectProperty
+from kivy.uix.boxlayout import BoxLayout
+from kivy.animation import Animation
+
+io.setmode(io.BCM)
+
+pir_pin = 18
+
+io.setup(pir_pin, io.IN, pull_up_down=io.PUD_DOWN)		 # activate PiR input
+
+
+class Netconf():
+	
+	def is_connected(self):
+		print ('Running network connectivity check.')
+		try:
+			urllib2.urlopen("http://www.google.com").close()
+		except urllib2.URLError:
+			print "Not Connected"
+			return False
+		else:
+			print "Connected"
+			return True
+
+	def CallApi(self):
+		print ('Calling the prometheus API for data.')
+		url = "https://prometheus-cube.herokuapp.com/api/keaton.okkonen@gmail.com"
+		response = urlopen(url).read()
+		data = json.loads(response.decode('utf-8'))
+		return data
+		
+	def WriteList(self, num, cont):
+		print ('Writing list text file.')
+		corenum = num
+		corenum += ".txt"
+		corefile = open(corenum, 'w')
+		for line in cont:
+			corefile.write("%s" % (line + '\n'))
+		corefile.close
+		progress = open(num + "s.txt", "w")
+		progress.write("%s" % "0")
+		progress.close
+		keyfile = open("key.txt", 'w')
+		keyfile.write("%s" % num)
+		keyfile.close
+
+	def WriteKey(self, num):
+		print ('Writing activelist')
+		activenum = num
+		keyfile = open("key.txt", 'w')
+		keyfile.write("%s" % activenum)
+		keyfile.close
+
+	def ReadList(self, num):
+		print ('Reading list text file.')
+		corenum = num
+		corenum += ".txt"
+		openfile = open(corenum, 'r')
+		lines = openfile.readlines()
+		openfile.close
+		if lines:
+			return lines
+		else:
+			return "null"
+
+	def CoreLine(self, num):
+		print ('Reading progress for current list.')
+		statnum = num
+		statnum += "s.txt"
+		statfile = open(statnum, 'r')
+		lines = statfile.readlines()
+		statfile.close
+		current = lines[0]
+		if current:
+			return current
+		else:
+			return 'null'
+
+	def CoreList(self):
+		print ('Reading which list is currently active.')
+		statfile = open("key.txt", 'r')
+		lines = statfile.readlines()
+		prime = lines[0].strip()
+		if prime:
+			return prime
+		else:
+			return 'null'
+
+	def IncrimentLine(self, num, currlist):
+		print ('Incrementing the line progress for current list.')
+		statnum = currlist
+		statnum += "s.txt"
+		statfile = open(statnum, 'w')
+		statfile.write("%s" % num)
+		statfile.close
+
+	def conf(self):
+		print ('Running configuration checks.')
+		if self.is_connected():
+			print ('Device online.')
+			data = self.CallApi()
+			listnum = data["pid"]
+			self.WriteKey(listnum)
+			listcont = data["listcont"]
+			corenum = listnum
+			corenum += ".txt"
+
+			if os.path.isfile(corenum):
+				print ('Active list previously loaded, passin.')
+
+			else:
+				print ('Active list does not exist.')
+				self.WriteList(listnum, listcont)
+
+			return self.pulldata()
+		else:
+			print ('Device is offline.')
+			return self.pulldata()
+
+	def pulldata(self):
+		print ('Collecting data.')
+		activefile = self.CoreList()
+		if (activefile != 'null'):
+			currentline = self.CoreLine(activefile)
+			filedata = self.ReadList(activefile)
+
+			print ('current list is : ' + activefile)
+			print ('current line is : ' + currentline)
+			print ('current list content is : ' + str(filedata))
+
+			return (filedata, int(currentline), activefile)
+
+		else:
+			print ('No luck reading / writing data.')
+			return 'null null null'
+
+def motion_detector(self):
+	print ("motion detect thread called.")
+	counter = 0
+	while True:
+		if io.input(pir_pin):
+			counter += 1
+			time.sleep(0.5)
+		else:
+			counter = 0
+			time.sleep(1)
+		if counter >= 3:
+			print ("motion detected!")
+			self.Animate()
+			time.sleep(6)
+
+
+class MainScreen(BoxLayout):
+	active_label = ObjectProperty(None)
+	net = Netconf()
+	currentlist, currentline, activefile = net.conf()
+	print(currentlist, currentline, activefile)
+	
+	def on_active_label(self, instance, value):
+		#start listener thread
+		pIR = Thread(target=motion_detector, args=(self,))
+		pIR.start()
+
+	def Animate(self):
+		right = Animation(x= int(self.width), color= [0,0,0,0])
+		fade = Animation(color= [0,0,0,0], duration=0.5)
+		fade.bind(on_complete=self.ChangeBtn)
+		snap = Animation(x=0, duration=0.01)
+		wait = Animation(duration = 5)
+		left = Animation(center_x=(int(self.width) / 2), color= [1,1,1,1])
+		anim = fade + snap + left + wait + right
+		anim.start(self.active_label)
+
+	def ChangeBtn(self, instance, value):
+
+		if (self.currentline > (len(self.currentlist) - 1)):
+			current_label = '** You have reached the end of this list! **'
+			self.currentline = -1
+		else:
+			current_label = self.currentlist[self.currentline]
+
+		label = self.ids['label_display']
+		label.text = current_label
+
+		self.currentline += 1
+		print("Iterated to next line! Next up: ", self.currentline)
+		self.net.IncrimentLine(self.currentline, self.activefile)
+
+class prometheusApp(App):
+	def build(self):
+		Window = MainScreen()
+		return Window
+
+if __name__ == '__main__':
+	prometheusApp().run()
